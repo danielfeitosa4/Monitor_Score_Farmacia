@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+
+# Estado da aplicação
+last_state.json
+
+# Logs
+*.log
+
+# Oracle Instant Client
+instantclient*/
