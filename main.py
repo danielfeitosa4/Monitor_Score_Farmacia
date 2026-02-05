@@ -130,10 +130,8 @@ def main():
             time.sleep(INTERVALO_SEGUNDOS)
 
         except Exception as e:
-            erro = f"❌ Erro no monitoramento: {e}"
-            print(erro)
-            enviar_telegram(erro)
-            time.sleep(15)
+            print("❌ Erro no monitoramento:", e)
+            time.sleep(10)
 
 
 if __name__ == "__main__":
