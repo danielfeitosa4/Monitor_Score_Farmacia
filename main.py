@@ -4,7 +4,7 @@ import time
 import requests
 from pathlib import Path
 from datetime import datetime
-import os 
+import os
 from dotenv import load_dotenv
 
 # ==========================
@@ -21,20 +21,30 @@ DSN = os.getenv("ORACLE_DSN")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID_GRUPO")
 
-
 INTERVALO_SEGUNDOS = 60
 STATE_FILE = Path("last_state.json")
 
 # ==========================
-# SQL DA VIEW
+# SQL DA VIEW DETALHADA
 # ==========================
 SQL = """
-select
+SELECT
     nr_atendimento,
     nm_paciente,
-    total_pontos
-from HC_SCORE_FARMACIA
+    idade,
+    creatinina,
+    total_pontos,
+    qtd_medicamentos,
+    nm_medicamentos,
+    qtd_medicamentos_mav,
+    nm_medicamentos_mav,
+    qtd_dispositivo,
+    nm_dispositivo,
+    qtd_parenteral,
+    nm_parenteral
+FROM hc_score_farmacia_det
 """
+
 
 # ==========================
 # FUNÇÕES
@@ -49,6 +59,12 @@ def enviar_telegram(mensagem: str):
     requests.post(url, json=payload, timeout=10)
 
 
+def normalizar_lista(valor):
+    if not valor:
+        return []
+    return [v.strip() for v in valor.split(",") if v.strip()]
+
+
 def buscar_scores():
     conn = oracledb.connect(
         user=USUARIO,
@@ -60,15 +76,47 @@ def buscar_scores():
     cur.execute(SQL)
 
     dados = {}
-    for nr_atendimento, nm_paciente, score_total in cur.fetchall():
+
+    def safe(valor, padrao=""):
+        return valor if valor is not None else padrao
+
+
+    for row in cur.fetchall():
+        (
+            nr_atendimento,
+            nm_paciente,
+            idade,
+            creatinina,
+            total_pontos,
+            qtd_medicamentos,
+            nm_medicamentos,
+            qtd_mav,
+            nm_mav,
+            qtd_dispositivo,
+            nm_dispositivo,
+            qtd_parenteral,
+            nm_parenteral
+        ) = row
+
         dados[str(nr_atendimento)] = {
-            "paciente": nm_paciente,
-            "score": score_total
+            "paciente": safe(nm_paciente),
+            "idade": safe(idade),
+            "creatinina": safe(creatinina),
+            "score": safe(total_pontos),
+            "qtd_medicamentos": safe(qtd_medicamentos),
+            "nm_medicamentos": safe(nm_medicamentos),
+            "qtd_mav": safe(qtd_mav),
+            "nm_mav": safe(nm_mav),
+            "qtd_dispositivo": safe(qtd_dispositivo),
+            "nm_dispositivo": safe(nm_dispositivo),
+            "qtd_parenteral": safe(qtd_parenteral),
+            "nm_parenteral": safe(nm_parenteral)
         }
 
     cur.close()
     conn.close()
     return dados
+
 
 
 def carregar_estado_anterior():
@@ -87,37 +135,38 @@ def comparar_estados(anterior, atual):
     for atendimento, dados_atual in atual.items():
         dados_ant = anterior.get(atendimento)
 
-        # Novo paciente
-        if not dados_ant:
-            msg = (
-                f"🆕 <b>Novo paciente monitorado</b>\n"
-                f"Atendimento: {atendimento}\n"
-                f"Paciente: {dados_atual['paciente']}\n"
-                f"Score: {dados_atual['score']}"
-            )
-            print(msg)
-            enviar_telegram(msg)
-            continue
+        if dados_ant != dados_atual:
+            enviar_snapshot_completo(atendimento, dados_atual)
+            
+def enviar_snapshot_completo(atendimento, d):
+    msg = (
+        f"⚠️ <b>ATUALIZAÇÃO CLÍNICA DO PACIENTE</b>\n\n"
+        f"🕒 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
+        f"📌 <b>Atendimento:</b> {atendimento}\n"
+        f"👤 <b>Paciente:</b> {d['paciente']}\n"
+        f"🎂 <b>Idade:</b> {d['idade']} anos\n"
+        f"🧪 <b>Creatinina:</b> {d['creatinina']}\n\n"
+        f"🔢 <b>SCORE TOTAL ATUAL:</b> <b>{d['score']}</b>\n\n"
+        f"💊 <b>Medicamentos:</b> {d['qtd_medicamentos']}\n"
+        f"{d['nm_medicamentos']}\n\n"
+        f"🚨 <b>Alta Vigilância (MAV):</b> {d['qtd_mav']}\n"
+        f"{d['nm_mav']}\n\n"
+        f"🧰 <b>Dispositivos:</b> {d['qtd_dispositivo']}\n"
+        f"{d['nm_dispositivo']}\n\n"
+        f"🥣 <b>Nutrição Parenteral:</b> {d['qtd_parenteral']}\n"
+        f"{d['nm_parenteral']}"
+    )
 
-        # Alteração de score
-        if dados_ant["score"] != dados_atual["score"]:
-            msg = (
-                f"⚠️ <b>ALTERAÇÃO DE SCORE</b>\n"
-                f"🕒 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
-                f"<b>Atendimento:</b> {atendimento}\n"
-                f"<b>Paciente:</b> {dados_atual['paciente']}\n"
-                f"<b>Score anterior:</b> {dados_ant['score']}\n"
-                f"<b>Score atual:</b> {dados_atual['score']}"
-            )
-            print(msg)
-            enviar_telegram(msg)
+    print(msg)
+    enviar_telegram(msg)
+
 
 
 # ==========================
 # LOOP PRINCIPAL
 # ==========================
 def main():
-    print("📡 Monitor de Score da Farmácia com Telegram iniciado...\n")
+    print("📡 Monitor de Score da Farmácia (DETALHADO) iniciado...\n")
 
     estado_anterior = carregar_estado_anterior()
 
