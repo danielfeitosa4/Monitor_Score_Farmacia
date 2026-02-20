@@ -26,42 +26,135 @@ def comparar_estados(anterior, atual):
         if not dados_ant:
             continue
 
-        if dados_ant != dados_atual and pode_notificar(atendimento):
-            blocos = []
+        if not pode_notificar(atendimento):
+            continue
 
-            # Medicamentos gerais
-            blocos.append(
-                diff_lista(
-                    "Medicamentos",
-                    dados_ant["qtd_medicamentos"],
-                    dados_ant["nm_medicamentos"],
-                    dados_atual["qtd_medicamentos"],
-                    dados_atual["nm_medicamentos"]
-                )
+        blocos = []
+
+        # ==========================
+        # VALORES SIMPLES
+        # ==========================
+        blocos.append(
+            diff_valor("Idade", dados_ant["idade"], dados_atual["idade"], " anos")
+        )
+
+        blocos.append(
+            diff_valor("Creatinina", dados_ant["creatinina"], dados_atual["creatinina"])
+        )
+
+        blocos.append(
+            diff_valor("Score Total", dados_ant["score"], dados_atual["score"])
+        )
+
+        # ==========================
+        # LISTAS
+        # ==========================
+        blocos.append(
+            diff_lista(
+                "Medicamentos",
+                dados_ant["qtd_medicamentos"],
+                dados_ant["nm_medicamentos"],
+                dados_atual["qtd_medicamentos"],
+                dados_atual["nm_medicamentos"]
             )
+        )
 
-            mensagem_diferencas = "".join(b for b in blocos if b)
-
-            enviar_snapshot_completo(
-                atendimento,
-                dados_atual,
-                mensagem_diferencas
+        blocos.append(
+            diff_lista(
+                "Medicamentos EV",
+                dados_ant["qtd_medicamentos_ev"],
+                dados_ant["nm_medicamentos_ev"],
+                dados_atual["qtd_medicamentos_ev"],
+                dados_atual["nm_medicamentos_ev"]
             )
+        )
 
-            ultimo_alerta[atendimento] = datetime.now()
+        blocos.append(
+            diff_lista(
+                "Antibióticos (ATB)",
+                dados_ant["qtd_medicamentos_atb"],
+                dados_ant["nm_medicamentos_atb"],
+                dados_atual["qtd_medicamentos_atb"],
+                dados_atual["nm_medicamentos_atb"]
+            )
+        )
+
+        blocos.append(
+            diff_lista(
+                "Alta Vigilância (MAV)",
+                dados_ant["qtd_medicamentos_mav"],
+                dados_ant["nm_medicamentos_mav"],
+                dados_atual["qtd_medicamentos_mav"],
+                dados_atual["nm_medicamentos_mav"]
+            )
+        )
+
+        blocos.append(
+            diff_lista(
+                "Dispositivos",
+                dados_ant["qtd_dispositivo"],
+                dados_ant["nm_dispositivo"],
+                dados_atual["qtd_dispositivo"],
+                dados_atual["nm_dispositivo"]
+            )
+        )
+
+        blocos.append(
+            diff_lista(
+                "Nutrição Parenteral",
+                dados_ant["qtd_parenteral"],
+                dados_ant["nm_parenteral"],
+                dados_atual["qtd_parenteral"],
+                dados_atual["nm_parenteral"]
+            )
+        )
+
+        # ==========================
+        # FINAL
+        # ==========================
+        blocos = [b for b in blocos if b]
+
+        if not blocos:
+            continue
+
+        mensagem_diferencas = "".join(blocos)
+
+        enviar_snapshot_completo(
+            atendimento,
+            dados_atual,
+            mensagem_diferencas
+        )
+
+        ultimo_alerta[atendimento] = datetime.now()
+
 
             
-def diff_lista(titulo, qtd_ant, lista_ant, qtd_atual, lista_atual):
-    if lista_ant == lista_atual:
+def diff_lista(titulo, qtd_ant, lista_ant, qtd_atual, lista_atual, emoji="💊"):
+    ant_set = set(normalizar_lista(lista_ant))
+    atual_set = set(normalizar_lista(lista_atual))
+
+    if ant_set == atual_set:
         return ""
 
-    return (
-        f"💊 <b>{titulo} – ATUALIZAÇÃO</b>\n\n"
-        f"📉 <b>Antes ({qtd_ant}):</b>\n"
-        f"{formatar_lista_em_linhas(lista_ant)}\n\n"
-        f"📈 <b>Agora ({qtd_atual}):</b>\n"
-        f"{formatar_lista_em_linhas(lista_atual)}\n\n"
+    adicionados = atual_set - ant_set
+    removidos = ant_set - atual_set
+
+    bloco = (
+        f"{emoji} <b>{titulo}:</b>\n"
+        f"• Antes: {qtd_ant}\n"
+        f"• Agora: {qtd_atual}\n"
     )
+
+    if adicionados:
+        bloco += "\n➕ <b>Adicionados:</b>\n"
+        bloco += "\n".join(f"  • {i}" for i in adicionados)
+
+    if removidos:
+        bloco += "\n\n➖ <b>Removidos:</b>\n"
+        bloco += "\n".join(f"  • {i}" for i in removidos)
+
+    return bloco
+
 
 
 # ==========================
@@ -231,6 +324,16 @@ def carregar_estado_anterior():
 def salvar_estado_atual(estado):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(estado, f, ensure_ascii=False, indent=2)
+        
+def diff_valor(titulo, valor_ant, valor_atual, sufixo=""):
+    if valor_ant == valor_atual:
+        return ""
+
+    return (
+        f"🔄 <b>{titulo}:</b>\n"
+        f"• Antes: {valor_ant}{sufixo}\n"
+        f"• Agora: {valor_atual}{sufixo}\n\n"
+    )
 
 def gerar_diferencas(dados_ant, dados_atual):
     if not dados_ant:
@@ -239,35 +342,114 @@ def gerar_diferencas(dados_ant, dados_atual):
     diferencas = []
 
     # ==========================
+    # IDADE
+    # ==========================
+    bloco = diff_valor(
+        "Idade",
+        dados_ant.get("idade"),
+        dados_atual.get("idade"),
+        " anos"
+    )
+    if bloco:
+        diferencas.append(bloco)
+
+    # ==========================
+    # CREATININA
+    # ==========================
+    bloco = diff_valor(
+        "Creatinina",
+        dados_ant.get("creatinina"),
+        dados_atual.get("creatinina"),
+    )
+    if bloco:
+        diferencas.append(bloco)
+
+    # ==========================
     # MEDICAMENTOS
     # ==========================
-    ant_lista = set(normalizar_lista(dados_ant.get("nm_medicamentos")))
-    atual_lista = set(normalizar_lista(dados_atual.get("nm_medicamentos")))
+    bloco = diff_lista(
+        "Medicamentos Gerais",
+        dados_ant.get("qtd_medicamentos"),
+        dados_ant.get("nm_medicamentos"),
+        dados_atual.get("qtd_medicamentos"),
+        dados_atual.get("nm_medicamentos"),
+        emoji="💊"
+    )
+    if bloco:
+        diferencas.append(bloco)
+        
+    # ==========================
+    # MEDICAMENTOS EV
+    # ==========================
+    bloco = diff_lista(
+        "Medicamentos EV",
+        dados_ant.get("qtd_medicamentos_ev"),
+        dados_ant.get("nm_medicamentos_ev"),
+        dados_atual.get("qtd_medicamentos_ev"),
+        dados_atual.get("nm_medicamentos_ev"),
+        emoji="💉"
+    )
+    if bloco:
+        diferencas.append(bloco)
+        
+    # ==========================
+    # MEDICAMENTOS ATB
+    # ==========================
+    bloco = diff_lista(
+        "Medicamentos ATB",
+        dados_ant.get("qtd_medicamentos_atb"),
+        dados_ant.get("nm_medicamentos_atb"),
+        dados_atual.get("qtd_medicamentos_atb"),
+        dados_atual.get("nm_medicamentos_atb"),
+        emoji="🧫"
+    )
+    if bloco:
+        diferencas.append(bloco)
+        
+    # ==========================
+    # MEDICAMENTOS MAV
+    # ==========================
+    bloco = diff_lista(
+        "Medicamentos MAV",
+        dados_ant.get("qtd_medicamentos_mav"),
+        dados_ant.get("nm_medicamentos_mav"),
+        dados_atual.get("qtd_medicamentos_mav"),
+        dados_atual.get("nm_medicamentos_mav"),
+        emoji="🚨"
+    )
+    if bloco:
+        diferencas.append(bloco)
 
-    ant_qtd = dados_ant.get("qtd_medicamentos", 0)
-    atual_qtd = dados_atual.get("qtd_medicamentos", 0)
+    # ==========================
+    # DISPOSITIVOS
+    # ==========================
+    bloco = diff_lista(
+        "Dispositivos",
+        dados_ant.get("qtd_dispositivo"),
+        dados_ant.get("nm_dispositivo"),
+        dados_atual.get("qtd_dispositivo"),
+        dados_atual.get("nm_dispositivo"),
+        emoji="🧰"
+    )
+    if bloco:
+        diferencas.append(bloco)
 
-    if ant_lista != atual_lista:
-        adicionados = atual_lista - ant_lista
-        removidos = ant_lista - atual_lista
-
-        bloco = (
-            "💊 <b>Medicamentos:</b>\n"
-            f"• Antes: {ant_qtd}\n"
-            f"• Agora: {atual_qtd}\n"
-        )
-
-        if adicionados:
-            bloco += "\n➕ <b>Adicionados:</b>\n"
-            bloco += "\n".join(f"  • {m}" for m in adicionados)
-
-        if removidos:
-            bloco += "\n\n➖ <b>Removidos:</b>\n"
-            bloco += "\n".join(f"  • {m}" for m in removidos)
-
+    # ==========================
+    # NUTRIÇÃO PARENTERAL
+    # ==========================
+    bloco = diff_lista(
+        "Nutrição Parenteral",
+        dados_ant.get("qtd_parenteral"),
+        dados_ant.get("nm_parenteral"),
+        dados_atual.get("qtd_parenteral"),
+        dados_atual.get("nm_parenteral"),
+        emoji="🥣"
+    )
+    if bloco:
         diferencas.append(bloco)
 
     return "\n\n".join(diferencas)
+
 
 
 def comparar_estados(anterior, atual):
