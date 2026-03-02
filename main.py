@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
+from openai import OpenAI
 
 COOLDOWN_MINUTOS = 30
 ultimo_alerta = {}
@@ -127,7 +128,126 @@ def comparar_estados(anterior, atual):
 
         ultimo_alerta[atendimento] = datetime.now()
 
+# ==========================
+# LM STUDIO CONFIG
+# ==========================
+LM_BASE_URL = "http://localhost:1234/v1"
+LM_MODEL = "mistral-7b-instruct"  # coloque o nome real do seu modelo
 
+lm_client = OpenAI(
+    base_url=LM_BASE_URL,
+    api_key="lm-studio"
+)
+
+def gerar_sql(pergunta):
+
+    prompt = """
+Você é um assistente hospitalar especialista em farmácia clínica.
+
+Use exclusivamente a view hc_score_farmacia_det.
+
+Regras obrigatórias:
+
+- Nunca use função agregadora (MAX, MIN, COUNT, AVG, SUM)
+  junto com colunas normais sem GROUP BY.
+- Para perguntas como "maior", "menor", "top", use ORDER BY.
+- Sempre coloque ORDER BY antes do FETCH.
+- Nunca use LIMIT.
+- Retorne apenas SQL Oracle válido.
+- Sempre finalize com FETCH FIRST 20 ROWS ONLY.
+
+Colunas disponíveis:
+nr_atendimento, nm_paciente, cd_unidade_basica,
+idade, creatinina, total_pontos,
+qtd_medicamentos, nm_medicamentos,
+qtd_medicamentos_ev, nm_medicamentos_ev,
+qtd_medicamentos_atb, nm_medicamentos_atb,
+qtd_medicamentos_mav, nm_medicamentos_mav,
+qtd_dispositivo, nm_dispositivo,
+qtd_parenteral, nm_parenteral.
+
+Retorne apenas SQL Oracle válido.
+Apenas SELECT.
+Sempre limite a 20 linhas usando:
+FETCH FIRST 20 ROWS ONLY
+"""
+
+    response = lm_client.chat.completions.create(
+        model=LM_MODEL,
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": pergunta}
+        ],
+        temperature=0
+    )
+
+    return response.choices[0].message.content.strip()
+
+def explicar_resultado(dados):
+
+    response = lm_client.chat.completions.create(
+        model=LM_MODEL,
+        messages=[
+            {"role": "system", "content": "Explique os dados para a equipe da farmácia clínica de forma objetiva."},
+            {"role": "user", "content": f"Dados retornados: {dados}"}
+        ],
+        temperature=0.3
+    )
+
+    return response.choices[0].message.content
+
+def modo_assistente():
+    print("\n🤖 Assistente de IA da Farmácia iniciado...")
+    print("Digite 'sair' para encerrar.\n")
+
+    conn = oracledb.connect(
+        user=USUARIO,
+        password=SENHA,
+        dsn=DSN
+    )
+
+    cursor = conn.cursor()
+
+    while True:
+        pergunta = input("\nPergunta: ")
+
+        if pergunta.lower() == "sair":
+            break
+
+        try:
+            sql = gerar_sql(pergunta)
+
+            # 🔥 Limpeza automática
+            sql = sql.replace("```sql", "").replace("```", "").strip()
+
+            # Remove ponto e vírgula final
+            if sql.endswith(";"):
+                sql = sql[:-1]
+
+            print("\n🔎 SQL gerado:")
+            print(sql)
+
+            if not sql.upper().startswith("SELECT"):
+                print("❌ SQL inválido bloqueado por segurança.")
+                continue
+
+            cursor.execute(sql)
+
+            colunas = [col[0] for col in cursor.description]
+            resultados = cursor.fetchall()
+
+            dados = [dict(zip(colunas, row)) for row in resultados]
+
+            resposta = explicar_resultado(dados)
+
+            print("\n📋 Resposta:")
+            print(resposta)
+
+        except Exception as e:
+            print("❌ Erro:", e)
+
+    cursor.close()
+    conn.close()
             
 def diff_lista(titulo, qtd_ant, lista_ant, qtd_atual, lista_atual, emoji="💊"):
     ant_set = set(normalizar_lista(lista_ant))
@@ -532,4 +652,16 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+
+    print("Escolha o modo:")
+    print("1 - Monitor Automático")
+    print("2 - Assistente IA")
+
+    escolha = input("Opção: ")
+
+    if escolha == "1":
+        main()
+    elif escolha == "2":
+        modo_assistente()
+    else:
+        print("Opção inválida.")
